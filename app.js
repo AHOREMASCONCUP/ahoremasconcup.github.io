@@ -1054,6 +1054,7 @@ function otherResultHtml(m){
   <button class="btn sm" data-act="saveSettings">Apply</button>
   <div class="label">End the match another way</div>
   <div class="row-btns"><button class="btn sm" data-act="noResult">No result (1 pt each)</button><button class="btn sm" data-act="walkover" data-w="${m.a}">Walkover to ${esc(tname(m.a))}</button><button class="btn sm" data-act="walkover" data-w="${m.b}">Walkover to ${esc(tname(m.b))}</button></div>
+  <div class="label">Demo or test match?</div><p class="kv">Wipes every ball, the toss and the result. No stats are kept.</p><button class="btn sm warn" data-act="resetMatch">Reset match (clear everything)</button>
   <button class="btn sm warn" data-act="delMatch">Delete this match</button></div></details>`;
 }
 function badBallsBanner(m){const n=m.inn.reduce((a,i)=>a+i.balls.filter(invalidW).length,0);
@@ -1065,7 +1066,7 @@ function padHtml(m){
   if(m.status==="super")return head+boardHtml(m)+`<div class="panel"><h2>Super Over result</h2><p class="kv">Each side nominates 3 batters and 1 bowler. The team batting second bats first.</p>
     <div class="field"><label class="label" for="so-score">Super Over scores (shown to everyone)</label><input id="so-score" placeholder="e.g. ${esc(tname(m.inn[1].bat))} 11/1, ${esc(tname(m.inn[0].bat))} 9/2"></div>
     <div class="row-btns"><button class="btn pri" data-act="superWin" data-w="${m.a}">${esc(tname(m.a))} won</button><button class="btn pri" data-act="superWin" data-w="${m.b}">${esc(tname(m.b))} won</button></div><button class="btn" data-act="undo">Undo last ball</button></div>`;
-  if(m.status==="done")return head+boardHtml(m)+sheetHtml(m)+`<div class="row-btns"><button class="btn" data-act="undo">Undo and reopen</button><button class="btn" data-act="sheet" data-k="fix">Fix an earlier ball</button></div>`;
+  if(m.status==="done")return head+boardHtml(m)+sheetHtml(m)+`<div class="row-btns"><button class="btn" data-act="undo">Undo and reopen</button><button class="btn" data-act="sheet" data-k="fix">Fix an earlier ball</button></div><div class="panel"><div class="label">Demo or test match?</div><p class="kv">Wipes every ball, the toss and the result. No stats are kept.</p><button class="btn sm warn" data-act="resetMatch">Reset match (clear everything)</button></div>`;
   const i=m.inn.length-1,inn=m.inn[i],c=inn.cur,avail=availBatters(m,inn);
   let need="";
   if(c.s==null||(c.ns==null&&avail.length)){
@@ -1384,6 +1385,17 @@ const acts={
     for(let r=0;r<rounds;r++)for(const g of["A","B"])for(const[a,b]of rr[g][r]||[]){const m={id:uidGen("m"),no:++no,stage:g,a,b,status:"scheduled",inn:[],result:"",winner:null,overs:T.overs,upd:Date.now()};M[m.id]=m;batch.set(doc(db,C("matches"),m.id),m)}
     batch.commit().catch(()=>flash("Fixtures not saved. Check your connection."));render();flash(`${no} league matches created. Find them under Score and Matches.`,true)},
   pubBoard:()=>publishBoard(true),
+  // Demo/test: put a match back to unplayed. If no other match has a ball, fantasy and the cup vote unlock again.
+  resetMatch:()=>{const m=M[ui.scoreSel];if(!m)return;ask(`Reset ${stageLabel(m)} (${tname(m.a)} v ${tname(m.b)})? Every ball, the toss and the result are wiped and no stats are kept. This cannot be undone.`,"Reset match",async()=>{
+    for(const k of["how","super","xi","ph","tgt","ov2","so","superScore"])delete m[k];
+    Object.assign(m,{status:"scheduled",inn:[],result:"",winner:null,toss:null,chose:null,overs:T.overs});
+    ui.toss=null;ui.sheet=null;saveMatch(m);
+    if(!KIDS&&!Object.values(M).some(x=>x.id!==m.id&&(x.inn||[]).some(i=>i.balls.length))){
+      fantasyLockWritten=false;try{await deleteDoc(doc(db,C("meta"),"lock"))}catch(e){}
+      if(SUBS.open||SUBS.phase)await setSubs({phase:0,open:false});
+      await publishBoard();
+    }
+    render();flash("Match reset. Nothing from it is saved.",true)})},
   subsOpen:()=>ask(`Open the substitution window for match day ${SUBS.phase+2}? Fans can then make up to 2 changes until the next first ball.`,"Open window",async()=>{await setSubs({phase:SUBS.phase+1,open:true});await publishBoard();render();flash("Substitution window open.",true)}),
   subsClose:()=>ask("Close the substitution window now?","Close window",async()=>{await setSubs({phase:SUBS.phase,open:false});await publishBoard();render();flash("Substitution window closed.",true)}),
   dlBackup:()=>{try{const ist=new Date(Date.now()+19800000).toISOString().slice(0,16).replace("T","-").replace(":","");
