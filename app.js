@@ -265,8 +265,27 @@ function mvpTable(filter){
     if(validW(b)&&b.w.f&&(b.w.k==="c"||b.w.k==="st"||b.w.k==="ro")){field[b.w.f]=(field[b.w.f]||0)+1;mt[b.w.f]=(mt[b.w.f]||new Set());mt[b.w.f].add(m.id)}})}));
   return Object.keys(pts).filter(id=>pteam(id)&&(!filter||filter(id))).map(id=>({id,pts:pts[id],r:bat[id]?.r||0,w:bowl[id]?.w||0,f:field[id]||0,m:mt[id]?.size||0})).sort((a,b)=>b.pts-a.pts||b.r-a.r);
 }
+/* Man of the Match = highest IMPACT score in that match (not the same as MVP points).
+   Batting: runs × pace factor (his strike rate ÷ the match's scoring rate, kept between 0.5 and 1.75).
+   Bowling: 20 per wicket + runs saved (what an average bowler would have conceded in his balls, minus what he did).
+   Fielding: 8 per catch, stumping or run-out.  Winning side: ×1.1.  Tie-break: MVP points. */
+const IMP={wkt:20,field:8,win:1.1,minF:0.5,maxF:1.75};
+function matchImpact(m){
+  const out={};const get=id=>out[id]||(out[id]={bat:0,bowl:0,field:0,total:0});
+  const sts=(m.inn||[]).map(innStats);const R=sts.reduce((a,s)=>a+s.runs,0),Bl=sts.reduce((a,s)=>a+s.legal,0);const rpb=Bl?R/Bl:1;
+  (m.inn||[]).forEach((inn,i)=>{const st=sts[i];
+    st.batOrder.forEach(id=>{const b=st.bat[id];if(!b.b&&!b.r)return;const f=b.b?Math.min(IMP.maxF,Math.max(IMP.minF,(b.r/b.b)/(rpb||1))):1;get(id).bat+=b.r*f});
+    st.bowlOrder.forEach(id=>{const b=st.bowl[id];if(!b.l&&!b.r)return;get(id).bowl+=b.w*IMP.wkt+(rpb*b.l-b.r)});
+    inn.balls.forEach(b=>{const w=validW(b);if(w&&w.f&&(w.k==="c"||w.k==="st"||w.k==="ro"))get(w.f).field+=IMP.field});
+  });
+  const win=m.winner&&m.winner!=="tie"&&m.winner!=="nr"?m.winner:null;
+  for(const id in out){const o=out[id];o.bat=Math.round(o.bat);o.bowl=Math.round(o.bowl);let t=o.bat+o.bowl+o.field;if(win&&pteam(id)===win)t*=IMP.win;o.total=Math.round(t)}
+  return out;
+}
 function matchMvp(m){
-  if(!m.inn||!m.inn.length)return null;const top=Object.entries(matchPoints(m)).filter(([id])=>pteam(id)).sort((a,b)=>b[1]-a[1])[0];return top?{id:top[0],pts:top[1]}:null;
+  if(!m.inn||!m.inn.length)return null;const imp=matchImpact(m),mp=matchPoints(m);
+  const top=Object.entries(imp).filter(([id])=>pteam(id)).sort((a,b)=>b[1].total-a[1].total||(mp[b[0]]||0)-(mp[a[0]]||0))[0];
+  return top?{id:top[0],pts:top[1].total,imp:top[1]}:null;
 }
 function fantasyLocked(){return Object.values(M).some(m=>(m.inn||[]).some(i=>i.balls.length>0))}
 async function loadFantasy(force){
@@ -670,7 +689,7 @@ function boardHtml(m){
   const first=m.inn[0].bat,second=first===m.a?m.b:m.a;
   const strip=`<div class="teams">${line(first,m.inn.length>1?s1.runs+"/"+s1.wk:st.runs+"/"+st.wk,m.inn.length>1?ovs(s1.legal):ovs(st.legal),m.inn.length===1)}${line(second,m.inn.length>1?st.runs+"/"+st.wk:null,m.inn.length>1?ovs(st.legal):"",m.inn.length>1)}</div>`;
   let chase="";
-  if(m.status==="done"||m.status==="super"){const mv=m.status==="done"?matchMvp(m):null;chase=`<div class="result">${esc(m.result)}</div>${mv?`<div class="pom" data-act="player" data-id="${mv.id}">${badge(pteam(mv.id),28)}<span><small>Player of the match</small><b>${esc(pname(mv.id))}</b></span><span class="pts">${mv.pts} pts</span></div>`:""}`}
+  if(m.status==="done"||m.status==="super"){const mv=m.status==="done"?matchMvp(m):null;chase=`<div class="result">${esc(m.result)}</div>${mv?`<div class="pom" data-act="player" data-id="${mv.id}">${badge(pteam(mv.id),28)}<span><small>Player of the match</small><b>${esc(pname(mv.id))}</b><small>Impact: bat ${mv.imp.bat} · bowl ${mv.imp.bowl} · field ${mv.imp.field}${pteam(mv.id)===m.winner?" · ×1.1 win":""}</small></span><span class="pts">${mv.pts} impact</span></div>`:""}`}
   else if(m.status==="break")chase=`<div class="chase">${esc(tname(inn.bowl))} need ${st.runs+1} to win off ${ovFor(m,1)} overs</div>`;
   else if(tg){const need=tg-st.runs,left=ov*6-st.legal;chase=`<div class="chase">${esc(tname(inn.bat))} need ${need} run${need===1?"":"s"} from ${left} ball${left===1?"":"s"}</div>`}
   const rates=m.status==="live"?`<div class="rates"><span>Run rate <b>${rate(st.runs,st.legal)}</b></span>${tg?`<span>Required <b>${rate(tg-st.runs,ov*6-st.legal)}</b></span><span>Target <b>${tg}</b>${m.tgt?" (revised)":""}</span>`:""}</div>`:"";
@@ -818,6 +837,15 @@ function podium(rows,lab){
   if(!rows.length)return"";const top=rows.slice(0,3);const order=[top[1],top[0],top[2]].filter(Boolean);
   return`<div class="podium">${order.map(r=>{const rank=rows.indexOf(r)+1;return`<div class="pod r${rank}" data-act="player" data-id="${r.id}">${badge(pteam(r.id),rank===1?56:44)}<span class="rk">${rank===1?"🏆":"#"+rank}</span><b>${esc(pname(r.id))}</b><span class="muted small">${esc(tmeta(pteam(r.id)).short)}${pAge(r.id)?" · "+pAge(r.id)+" yrs":""}</span><span class="val">${r.pts}<small> ${lab}</small></span></div>`}).join("")}</div>`;
 }
+function awardsHelp(){
+  return`<details class="card"><summary><span>How MVP and Man of the Match work</span></summary><div class="in kv">
+  <b>MVP (whole tournament)</b>: points added up over every match: run 1 · four +1 · six +2 · 30 runs +4 · 50 runs +8 · duck −2 · wicket 25 · 3 wickets +8 · catch, stumping or run-out 8 · dot ball 1 · maiden 12. The same points count in fantasy.<br><br>
+  <b>Man of the Match (each match)</b>: the highest <b>impact</b> score in that game.<br>
+  • Batting: runs × pace. Pace = his strike rate compared with the match’s scoring rate (between 0.5× and 1.75×), so quick runs in a low-scoring game count more.<br>
+  • Bowling: 20 per wicket + runs saved (what an average bowler in that match would have given away in his balls, minus what he gave).<br>
+  • Fielding: 8 per catch, stumping or run-out.<br>
+  • Winning team: ×1.1. A tie in impact goes to the player with more MVP points.</div></details>`;
+}
 function statsView(){
   if(!T)return liveView();
   const{bat,bowl}=tourStats();
@@ -828,7 +856,7 @@ function statsView(){
     const em=ui.stat==="emerging";const rows=mvpTable(em?id=>{const g=pAge(id);return g&&g<=(T.emergingAge||DEF.emergingAge)}:null);
     head=podium(rows,"pts");
     body=rows.length?`<table><thead><tr><th>#</th><th>Player</th><th>Pts</th><th>M</th><th>R</th><th>W</th><th>Ct</th></tr></thead><tbody>${rows.slice(0,25).map((r,i)=>`<tr${i<3?' class="q"':""}><td style="text-align:left">${i+1}</td>${nm(r.id)}<td><b>${r.pts}</b></td><td>${r.m}</td><td>${r.r}</td><td>${r.w}</td><td>${r.f}</td></tr>`).join("")}</tbody></table>`:"";
-    note=em?`Emerging player: aged ${T.emergingAge||DEF.emergingAge} or under at registration, ranked by MVP points.`:"MVP points: run 1, four +1, six +2, 30 runs +4, 50 runs +8, duck −2, wicket 25, 3-wicket haul +8, catch/stumping/run-out 8, dot ball 1, maiden 12.";
+    note=em?`Emerging player: aged ${T.emergingAge||DEF.emergingAge} or under at registration, ranked by MVP points.`:"MVP = points over the whole tournament. Tap “How MVP and Man of the Match work” below for the full breakdown.";
   }else if(ui.stat==="wkts"){
     const rows=Object.entries(bowl).filter(([,x])=>x.l>0).sort((a,b)=>b[1].w-a[1].w||(a[1].r*6/a[1].l)-(b[1].r*6/b[1].l)).slice(0,20);
     body=rows.length?`<table><thead><tr><th>Bowler</th><th>W</th><th>O</th><th>R</th><th>Econ</th><th>Best</th></tr></thead><tbody>${rows.map(([id,x])=>`<tr>${nm(id)}<td><b>${x.w}</b></td><td>${ovs(x.l)}</td><td>${x.r}</td><td>${rate(x.r,x.l)}</td><td>${x.bw}/${x.br}</td></tr>`).join("")}</tbody></table>`:"";
@@ -838,7 +866,7 @@ function statsView(){
     const cols=key==="s"?[["6s","s"],["R","r"],["4s","f"]]:key==="f"?[["4s","f"],["R","r"],["6s","s"]]:[["R","r"],["6s","s"],["4s","f"]];
     body=rows.length?`<table><thead><tr><th>Batter</th>${cols.map(c=>`<th>${c[0]}</th>`).join("")}<th>Inn</th><th>HS</th><th>SR</th></tr></thead><tbody>${rows.map(([id,x])=>`<tr>${nm(id)}${cols.map((c,i)=>`<td>${i?x[c[1]]:`<b>${x[c[1]]}</b>`}</td>`).join("")}<td>${x.inns}</td><td>${x.hs}${x.hsNo?"*":""}</td><td>${x.b?(x.r*100/x.b).toFixed(0):"–"}</td></tr>`).join("")}</tbody></table>`:"";
   }
-  return`<section><h2>Player stats</h2><div class="opts">${chips}</div>${head}${body?`<div class="tbl">${body}</div>`:`<div class="empty"><strong>No stats yet</strong>Leaders appear after the first ball is bowled.</div>`}<p class="kv">${note||"Across all matches including knockouts. Updates live."}</p></section>`;
+  return`<section><h2>Player stats</h2><div class="opts">${chips}</div>${head}${body?`<div class="tbl">${body}</div>`:`<div class="empty"><strong>No stats yet</strong>Leaders appear after the first ball is bowled.</div>`}<p class="kv">${note||"Across all matches including knockouts. Updates live."}</p>${awardsHelp()}</section>`;
 }
 function teamView(){
   const id=ui.teamId,t=teamOf(id);if(!t)return liveView();
