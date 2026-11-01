@@ -7,6 +7,7 @@ on:
         required: true
 permissions:
   pages: write
+  deployments: write
   contents: read
 jobs:
   unstick:
@@ -15,7 +16,16 @@ jobs:
       - name: Cancel stuck deployment and request a fresh build
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ inputs.sha }}
         run: |
-          gh api -X POST "repos/${{ github.repository }}/pages/deployments/${{ inputs.sha }}/cancel" && echo "::notice title=Cancelled::${{ inputs.sha }}" || echo "::notice title=Cancel failed::maybe already finished"
-          sleep 5
-          gh api -X POST "repos/${{ github.repository }}/pages/builds" && echo "::notice title=Rebuild::requested" || echo "::notice title=Rebuild request failed::"
+          note(){ echo "::notice title=$1::$(echo "$2" | tr '\n' ' ' | cut -c1-600)"; }
+          note "Pages status" "$(gh api repos/$REPO/pages/deployments/$SHA 2>&1)"
+          note "Cancel" "$(gh api -X POST repos/$REPO/pages/deployments/$SHA/cancel 2>&1)"
+          # Also mark any in-progress github-pages deployment for that commit as failed
+          for id in $(gh api "repos/$REPO/deployments?environment=github-pages&per_page=20" --jq ".[] | select(.sha==\"$SHA\") | .id"); do
+            note "Deployment $id" "$(gh api -X POST repos/$REPO/deployments/$id/statuses -f state=failure -f description='cancelled stuck deploy' 2>&1 | head -c 300)"
+          done
+          sleep 8
+          note "Pages status after" "$(gh api repos/$REPO/pages/deployments/$SHA 2>&1)"
+          note "Rebuild" "$(gh api -X POST repos/$REPO/pages/builds 2>&1)"
