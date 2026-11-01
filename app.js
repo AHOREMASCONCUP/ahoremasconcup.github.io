@@ -641,7 +641,7 @@ function sponsorHtml(){
 const fmtWhen=w=>{if(!w)return"";const d=new Date(w);if(isNaN(d))return"";return d.toLocaleString("en-IN",{weekday:"short",day:"numeric",month:"short",hour:"numeric",minute:"2-digit"})};
 const fmtDay=w=>{if(!w)return"Date to be announced";const d=new Date(w);if(isNaN(d))return"Date to be announced";return d.toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long"})};
 const fmtTime=w=>{if(!w)return"";const d=new Date(w);return isNaN(d)?"":d.toLocaleTimeString("en-IN",{hour:"numeric",minute:"2-digit"})};
-const stageLabel=m=>`${STAGES[m.stage]||""}${isLeague(m)?" · Match "+m.no:""}`;
+const stageLabel=m=>`${STAGES[m.stage]||""}${isLeague(m)?" · Match "+m.no:""}${m.pitch?" · "+m.pitch:""}`;
 function statusPill(m){
   return m.status==="live"?`<span class="pill live">Live</span>`:m.status==="break"?`<span class="pill live">Innings break</span>`:m.status==="super"?`<span class="pill live">Super Over</span>`
     :m.status==="done"?`<span class="pill done">Result</span>`:m.status==="setup"?`<span class="pill live">Toss done</span>`:`<span class="pill up">Upcoming</span>`;

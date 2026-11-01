@@ -87,6 +87,24 @@ if (ACTION === "real-setup") {
     const j = await r.json(); note("Fan sign-in from new site", r.status + " " + (j.idToken ? "OK" : JSON.stringify(j.error || j).slice(0, 200)));
     if (j.localId) await call("POST", `https://identitytoolkit.googleapis.com/v1/projects/${project}/accounts:delete`, { localId: j.localId }).catch(() => {});
   } catch (e) { note("Fan sign-in FAILED", e.message); }
+} else if (ACTION === "fixtures") {
+  // Official league fixtures (1 Nov 2026 schedule): replaces the league matches with these 20, in order, with time and pitch.
+  // Positions A1..A5 / B1..B5 = the order of each group's teams in players.js. Only allowed before any ball is bowled.
+  const tdoc = await call("GET", `${api}/tournament/main`);
+  const dec = v => v.stringValue ?? (v.integerValue !== undefined ? +v.integerValue : v.doubleValue ?? v.booleanValue ?? (v.arrayValue ? (v.arrayValue.values || []).map(dec) : v.mapValue ? Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k, x]) => [k, dec(x)])) : null));
+  const teams = dec({ mapValue: { fields: tdoc.fields } }).teams;
+  const pos = {}; for (const g of ["A", "B"]) PRESET.filter(t => t.group === g).forEach((t, i) => { const tm = teams.find(x => x.name.toLowerCase() === t.name.toLowerCase()); if (!tm) throw new Error("team not in DB: " + t.name); pos[g + (i + 1)] = tm.id; });
+  const T1 = ["07:30", "09:10", "10:50", "12:30", "13:50"];
+  const D1 = [["A1","A2","B1","B2"],["A3","A4","B3","B4"],["A5","A1","B5","B1"],["A2","A3","B2","B3"],["A4","A5","B4","B5"]];
+  const D2 = [["B3","B5","A3","A5"],["B2","B4","A2","A4"],["B1","B3","A1","A3"],["B2","B5","A2","A5"],["B1","B4","A1","A4"]];
+  const rows = []; [["2026-11-29", D1], ["2026-12-06", D2]].forEach(([day, D]) => D.forEach((r, i) => { rows.push([day, T1[i], r[0], r[1], "Pitch 1"]); rows.push([day, T1[i], r[2], r[3], "Pitch 2"]); }));
+  const existing = await listIds("matches");
+  const live = []; for (const n of existing) { const d = await call("GET", `${api}/${n.split("/documents/")[1]}`); const st = d.fields?.status?.stringValue; if (st && !["scheduled", "setup"].includes(st)) live.push(n); }
+  if (live.length) throw new Error("matches already started; refusing to replace fixtures");
+  const w = [...existing.map(n => ({ delete: n })), ...(await listIds("polls")).map(n => ({ delete: n }))];
+  rows.forEach(([day, t, a, b, pitch], i) => { const id = uidGen("m"); w.push({ update: { name: `${root}/matches/${id}`, fields: enc({ id, no: i + 1, stage: a[0], a: pos[a], b: pos[b], status: "scheduled", inn: [], result: "", winner: null, overs: 12, when: `${day}T${t}:00+05:30`, pitch, upd: Date.now() }).mapValue.fields } }); });
+  await commit(w);
+  console.log(`::notice title=Fixtures::${rows.length} league matches written. M1 ${rows[0].join(" ")} … M20 ${rows[19].join(" ")}`);
 } else if (ACTION === "restore") {
   // Put back records from a backup file (fetched from the backups branch into restore.json by the workflow).
   // Only overwrites the collections listed in COLS (default: teams, matches and meta, adults + kids). Never deletes anything.
