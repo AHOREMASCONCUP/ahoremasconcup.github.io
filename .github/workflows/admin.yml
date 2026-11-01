@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "status, go-live-check, kids-teams, fixtures, restore or real-setup (real-setup WIPES everything)"
+        description: "status, go-live-check, kids-teams, fixtures, squads, restore or real-setup (real-setup WIPES everything)"
         required: true
         default: status
       file:

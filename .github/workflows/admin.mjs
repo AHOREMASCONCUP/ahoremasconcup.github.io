@@ -105,6 +105,25 @@ if (ACTION === "real-setup") {
   rows.forEach(([day, t, a, b, pitch], i) => { const id = uidGen("m"); w.push({ update: { name: `${root}/matches/${id}`, fields: enc({ id, no: i + 1, stage: a[0], a: pos[a], b: pos[b], status: "scheduled", inn: [], result: "", winner: null, overs: 12, when: `${day}T${t}:00+05:30`, pitch, upd: Date.now() }).mapValue.fields } }); });
   await commit(w);
   console.log(`::notice title=Fixtures::${rows.length} league matches written. M1 ${rows[0].join(" ")} … M20 ${rows[19].join(" ")}`);
+} else if (ACTION === "squads") {
+  // Load the auction squads (squads-adults.json) into the tournament: each team's players in auction order.
+  // A player already in the team (the icon) keeps his id; everyone else gets a new id. Refused once a ball is bowled.
+  const SQ = JSON.parse(fs.readFileSync(".github/workflows/squads-adults.json", "utf8"));
+  const lock = await client.request({ url: `${api}/meta/lock` }).then(() => true).catch(e => { if (e.response?.status === 404) return false; throw e; });
+  if (lock) throw new Error("a ball has been bowled; refusing to replace squads");
+  const tdoc = await call("GET", `${api}/tournament/main`);
+  const dec = v => v.stringValue ?? (v.integerValue !== undefined ? +v.integerValue : v.doubleValue ?? v.booleanValue ?? (v.arrayValue ? (v.arrayValue.values || []).map(dec) : v.mapValue ? Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k, x]) => [k, dec(x)])) : null));
+  const tour = dec({ mapValue: { fields: tdoc.fields } });
+  const norm = x => String(x || "").trim().toLowerCase();
+  let total = 0;
+  for (const sq of SQ) {
+    const tm = tour.teams.find(t => norm(t.name) === norm(sq.team)); if (!tm) throw new Error("team not found: " + sq.team);
+    const old = tm.players || [];
+    tm.players = sq.players.map(p => { const o = old.find(x => norm(x.name) === norm(p.name)); const r = { id: o ? o.id : uidGen("p"), name: p.name, reg: p.reg, role: p.role }; if (p.age) r.age = p.age; return r; });
+    total += tm.players.length;
+  }
+  await call("PATCH", `${api}/tournament/main?updateMask.fieldPaths=teams`, { fields: { teams: enc(tour.teams) } });
+  console.log(`::notice title=Squads::${total} players loaded into ${SQ.length} teams: ${SQ.map(s => s.team + " " + s.players.length).join(", ")}`);
 } else if (ACTION === "restore") {
   // Put back records from a backup file (fetched from the backups branch into restore.json by the workflow).
   // Only overwrites the collections listed in COLS (default: teams, matches and meta, adults + kids). Never deletes anything.
