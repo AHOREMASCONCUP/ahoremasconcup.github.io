@@ -5,7 +5,8 @@ import { initializeFirestore, getFirestore, persistentLocalCache, persistentMult
 /* ================= config ================= */
 const CFG = window.MASCON_CONFIG || {};
 // Which tournament: adults (default) or kids (?cup=kids). Kids data lives in k-prefixed collections.
-const DEMO=(()=>{try{return new URLSearchParams(location.search).get("demo")==="1"}catch(e){return false}})();
+const DEMO_Q=(()=>{try{return new URLSearchParams(location.search).get("demo")||""}catch(e){return""}})();
+const DEMO=DEMO_Q==="1"||DEMO_Q==="full",DEMO_FULL=DEMO_Q==="full";
 const KIDS=(()=>{try{return new URLSearchParams(location.search).get("cup")==="kids"}catch(e){return false}})();
 const C=n=>KIDS?"k"+n:n;
 const SK=k=>KIDS?k+"-kids":k;
@@ -416,7 +417,7 @@ function fantasyView(){
   const demoP=DEMO?`<div class="panel"><h2>Demo controls</h2><p class="kv">${DEMO_DAY===0?"Pick your team (the rules are checked as you pick), then play match day 1 with fake scores."
     :DEMO_DAY<3?`Match day ${DEMO_DAY} of 3 played. The substitution window is open: tap <b>Make substitutions</b> in your team to swap up to 2 players and change captain/vice-captain, then play match day ${DEMO_DAY+1}.`
     :"All 3 match days played. Final points and leaderboard below."}</p><div class="row-btns">${DEMO_DAY<3?`<button class="btn pri" data-act="demoSim">Play match day ${DEMO_DAY+1}</button>`:""}<button class="btn" data-act="demoExit">Exit demo</button></div></div>`:"";
-  return`<section>${demoP}${DEMO?"":iosNoteHtml()}${fantasyRulesHtml(!FT.mine&&!locked)}${mine}${lb}${mp}${cupHtml()}${scoring}${DEMO?"":predictionHtml()}</section>`;
+  return`<section>${demoP}${DEMO?"":iosNoteHtml()}${fantasyRulesHtml(!FT.mine&&!locked)}${mine}${lb}${mp}${cupHtml()}${scoring}${DEMO&&!DEMO_FULL?"":predictionHtml()}</section>`;
 }
 // Who a team plays next: its fixtures on the next match day (by date), or its next 2 fixtures if dates aren't set
 function nextOpps(tid){
@@ -547,7 +548,7 @@ function delMatchDoc(id){deleteDoc(doc(db,C("matches"),id)).catch(()=>setSync("e
 let DEMO_DATA=null,DEMO_DAY=0,DEMO_DAY_OF={};
 async function demoBoot(){
   FT.myId=null;FT.mine=null;
-  document.body.insertAdjacentHTML("afterbegin",`<div class="demobar"><b>DEMO PREVIEW</b> · demo squads · nothing is saved</div>`);
+  document.body.insertAdjacentHTML("afterbegin",DEMO_FULL?`<div class="demobar"><b>DEMO TOURNAMENT</b> · fake scores · nothing is saved</div>`:`<div class="demobar"><b>DEMO PREVIEW</b> · demo squads · nothing is saved</div>`);
   try{const r=await fetch("demo.json",{cache:"no-store"});DEMO_DATA=await r.json()}catch(e){fatal="read";loaded={t:true,m:true};render();return}
   T={...DEF,...DEMO_DATA.tournament};
   // Start with every match unplayed so fantasy picks are open
@@ -558,6 +559,15 @@ async function demoBoot(){
   M={};ms.forEach(m=>M[m.id]={...m,status:"scheduled",inn:[],result:"",winner:null,toss:null,chose:null,when:DAYS[DEMO_DAY_OF[m.id]]+"T09:00"});
   DEMO_DAY=0;SUBS={phase:0,open:false};
   FT.all=(DEMO_DATA.fantasy||[]).map(f=>({id:f.id,name:f.name,p:f.p,c:f.p[0],vc:f.p[1]}));FAN.all={};FAN.polls={};
+  if(DEMO_FULL){
+    // Whole tournament already played: every result, tables, stats, fantasy and prediction leaderboards, cup vote
+    ms.forEach(m=>M[m.id]={...m,when:M[m.id].when,ph:DEMO_DAY_OF[m.id]});DEMO_DAY=3;SUBS={phase:2,open:false};
+    let seed=7;const rnd=()=>(seed=(seed*9301+49297)%233280)/233280;
+    const fans=(DEMO_DATA.fantasy||[]).map(f=>({u:"d"+f.id,name:f.name}));fans.forEach(f=>FAN.all[f.u]=f.name);
+    ms.forEach(m=>{const v={};fans.forEach(f=>{if(rnd()<0.8)v[f.u]=rnd()<(m.winner===m.a?0.62:0.38)?m.a:m.b});FAN.polls[m.id]=v});
+    CUP={c:{},mine:null,at:Date.now(),final:true};(T.teams||[]).forEach(t=>CUP.c[t.id]=Math.round(rnd()*30)+3);
+    loaded={t:true,m:true};ui.tab="live";render();return;
+  }
   loaded={t:true,m:true};ui.tab="fantasy";render();
 }
 function demoPlayDay(){
